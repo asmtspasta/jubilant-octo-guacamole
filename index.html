@@ -536,23 +536,54 @@ const RepsInput=({value,onChange})=>{
   );
 };
 
-/* ═══════════ BEEP SOUND ═══════════ */
-const beepCtx=typeof AudioContext!=="undefined"?new AudioContext():typeof webkitAudioContext!=="undefined"?new webkitAudioContext():null;
-function playBeep(freq=880,duration=0.12){
-  if(!beepCtx)return;
+/* ═══════════ BEEP SOUND (iOS compatible) ═══════════ */
+let beepCtx=null;
+let beepUnlocked=false;
+
+function getAudioCtx(){
+  if(!beepCtx){
+    try{beepCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){return null;}
+  }
+  return beepCtx;
+}
+
+function unlockAudio(){
+  if(beepUnlocked)return;
+  const ctx=getAudioCtx();
+  if(!ctx)return;
+  if(ctx.state==="suspended")ctx.resume();
+  // Silent buffer to unlock iOS audio
+  const buf=ctx.createBuffer(1,1,22050);
+  const src=ctx.createBufferSource();
+  src.buffer=buf;src.connect(ctx.destination);
+  src.start(0);
+  beepUnlocked=true;
+}
+
+// Unlock on ANY user interaction
+if(typeof document!=="undefined"){
+  const events=["touchstart","touchend","click","keydown"];
+  const doUnlock=()=>{unlockAudio();events.forEach(e=>document.removeEventListener(e,doUnlock,true));};
+  events.forEach(e=>document.addEventListener(e,doUnlock,true));
+}
+
+function playBeep(freq,duration){
+  const f=freq||880,dur=duration||0.12;
+  const ctx=getAudioCtx();
+  if(!ctx)return;
   try{
-    if(beepCtx.state==="suspended")beepCtx.resume();
-    const o=beepCtx.createOscillator();
-    const g=beepCtx.createGain();
-    o.connect(g);g.connect(beepCtx.destination);
-    o.type="sine";o.frequency.value=freq;
-    g.gain.value=0.3;
-    g.gain.exponentialRampToValueAtTime(0.01,beepCtx.currentTime+duration);
-    o.start(beepCtx.currentTime);
-    o.stop(beepCtx.currentTime+duration);
+    if(ctx.state==="suspended")ctx.resume();
+    const o=ctx.createOscillator();
+    const g=ctx.createGain();
+    o.connect(g);g.connect(ctx.destination);
+    o.type="sine";o.frequency.value=f;
+    g.gain.setValueAtTime(0.4,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01,ctx.currentTime+dur);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime+dur);
   }catch(e){}
 }
-function playFinalBeep(){playBeep(1200,0.25);}
+function playFinalBeep(){playBeep(1200,0.3);setTimeout(()=>playBeep(1500,0.3),150);}
 
 /* ═══════════ REST TIMER (panel + mini) ═══════════ */
 const RestTimerPanel=({rem,total,onMinimize,onSkip,onAdd30})=>{
@@ -924,6 +955,10 @@ function App(){
     let nw=editId?data.workouts.map(x=>x.id===editId?wo:x):[...data.workouts,wo];
     nw.sort((a,b)=>new Date(a.date)-new Date(b.date));
     save({...data,workouts:nw});setShowWM(false);setEditId(null);
+    // Cloud sync
+    supaSubmitWorkout(wo,myName);
+    const totalVol=nw.reduce((a,w)=>a+(w.volume||0),0);
+    supaUpsertProfile(myName,{totalWorkouts:nw.length,totalVolume:totalVol,streak:getStreak(nw)});
   };
 
   const delWO=id=>{save({...data,workouts:data.workouts.filter(w=>w.id!==id)});setDelId(null);};
