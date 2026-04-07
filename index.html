@@ -343,6 +343,7 @@ async function supaSubmitWorkout(wo,username){
     const row={
       user_id:ANON_ID,
       username:username||"Anonymous",
+      local_id:wo.id,
       workout_name:wo.entries.map(e=>e.name).slice(0,3).join(", "),
       total_volume:wo.volume||0,
       duration_seconds:wo.duration||0,
@@ -354,6 +355,13 @@ async function supaSubmitWorkout(wo,username){
     if(error)console.warn("Supa insert error:",error);
     return data;
   }catch(e){console.warn("Supa submit failed:",e);return null;}
+}
+
+async function supaDeleteWorkout(localId){
+  if(!supaClient||!localId)return;
+  try{
+    await supaClient.from("workout_sessions").delete().eq("local_id",localId).eq("user_id",ANON_ID);
+  }catch(e){console.warn("Supa delete failed:",e);}
 }
 
 async function supaFetchLeaderboard(period){
@@ -961,7 +969,13 @@ function App(){
     supaUpsertProfile(myName,{totalWorkouts:nw.length,totalVolume:totalVol,streak:getStreak(nw)});
   };
 
-  const delWO=id=>{save({...data,workouts:data.workouts.filter(w=>w.id!==id)});setDelId(null);};
+  const delWO=id=>{
+    save({...data,workouts:data.workouts.filter(w=>w.id!==id)});setDelId(null);
+    supaDeleteWorkout(id);
+    const nw=data.workouts.filter(w=>w.id!==id);
+    const totalVol=nw.reduce((a,w)=>a+(w.volume||0),0);
+    supaUpsertProfile(myName,{totalWorkouts:nw.length,totalVolume:totalVol,streak:getStreak(nw)});
+  };
 
   const addManEx=ex=>{setWEntries(p=>[...p,{eid:ex.id,name:ex.n,mg:ex.mg,sets:[{r:10,w:0}]}]);setShowEP(false);};
   const updSet=(ei,si,f,v)=>setWEntries(p=>p.map((e,i)=>i===ei?{...e,sets:e.sets.map((s,j)=>j===si?{...s,[f]:v}:s)}:e));
